@@ -378,7 +378,7 @@ TARGETS: list[ScrapeTarget | TargetGroup] = [
         file_type="zip/folder",
     ),
     ScrapeTarget(
-        name="killer-e5000b",
+        name="killer-ethernet",
         path="network/{name}",
         resolver_type="static",
         resolver=resolve_intel_static,
