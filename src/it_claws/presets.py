@@ -378,6 +378,19 @@ TARGETS: list[ScrapeTarget | TargetGroup] = [
         file_type="zip/folder",
     ),
     ScrapeTarget(
+        name="killer-e5000b",
+        path="network/{name}",
+        resolver_type="static",
+        resolver=resolve_intel_static,
+        resolver_kwargs={
+            "url": "https://www.intel.com/content/www/us/en/download/19779/intel-killer-performance-suite.html"
+        },
+        random_ua=False,
+        include_cookies=["aws-waf-token"],
+        file_type="exe",
+        rename_as="KillerPerformanceSuite_UWD_x64",
+    ),
+    ScrapeTarget(
         name="crystaldiskinfo",
         path="tool/{name}",
         resolver_type="static",
