@@ -57,10 +57,15 @@ jobs:
           cd .\dist\
           7z a "${{ github.event.repository.name }}.windows-${{ matrix.architecture }}.zip" ./${{ github.event.repository.name }} -mx9
 
+      - name: Bundle 7zip into the executable folder
+        run: |
+          New-Item -ItemType Directory -Force dist\${{ github.event.repository.name }}\bin\7zip | Out-Null
+          Copy-Item dist\bin\7zip\* dist\${{ github.event.repository.name }}\bin\7zip\
+          curl -sL -o dist\${{ github.event.repository.name }}\bin\7zip\License.txt https://www.7-zip.org/license.txt
+
       - name: Package bundle zip
         run: |
           cd .\dist\
-          7z a "${{ github.event.repository.name }}.windows-${{ matrix.architecture }}-bundle.zip" .\${{ github.event.repository.name }}\bin\7zip\7za.exe
           7z a "${{ github.event.repository.name }}.windows-${{ matrix.architecture }}-bundle.zip" .\${{ github.event.repository.name }} -mx9
 
       - name: Upload artifacts
@@ -103,6 +108,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           provenance: true
           sbom: true
 
