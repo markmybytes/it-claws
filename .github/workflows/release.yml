@@ -1,12 +1,17 @@
-name: Create Release
+name: Release
 
 on:
   push:
     tags:
       - v*
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build:
@@ -14,90 +19,120 @@ jobs:
     timeout-minutes: 15
     strategy:
       matrix:
-        architecture: [i386, amd64]
-        include:
-          - architecture: i386
-            build-arch: x86
-            build-name: i386-windows
-          - architecture: amd64
-            build-arch: x64
-            build-name: amd64-windows
+        architecture: [x86, x86_64]
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - name: Setup Python environment
-        uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: "3.13"
-          architecture: ${{ matrix.build-arch }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            uv.lock
+          python-arch: ${{ matrix.architecture }}
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install .
-          pip install pyinstaller
+      - run: uv sync --locked
 
       - name: Install UPX
-        uses: crazy-max/ghaction-upx@v3
+        uses: crazy-max/ghaction-upx@v4
         with:
           install-only: true
 
       - name: Download 7zip binaries
         run: |
-          curl -sL -o 7z2501-extra.7z https://www.7-zip.org/a/7z2501-extra.7z
-          if ("${{ matrix.architecture }}" -eq "i386") {
-            7z e 7z2501-extra.7z -odist/bin/7zip 7z*.*
+          curl -sL -o 7z2604-extra.7z https://www.7-zip.org/a/7z2604-extra.7z
+          if ("${{ matrix.architecture }}" -eq "x86") {
+            7z e 7z2604-extra.7z -odist/bin/7zip 7z*.*
           } else {
-            7z e 7z2501-extra.7z -odist/bin/7zip x64/7z*.*
+            7z e 7z2604-extra.7z -odist/bin/7zip x64/7z*.*
           }
-          Remove-Item 7z2501-extra.7z
+          Remove-Item 7z2604-extra.7z
 
-      - name: Build the executable (Onedir mode)
-        run: |
-          pyinstaller .\src\it_claws\main.py -cD -n ${{ github.event.repository.name }} `
-            --collect-all selenium --collect-all inquirer --copy-metadata readchar
+      - name: Build the executable
+        run: >
+          uv run --no-sync --with pyinstaller pyinstaller .\src\it_claws\main.py
+          -cD -n ${{ github.event.repository.name }} --collect-all selenium
+          --collect-all inquirer --copy-metadata readchar
 
       - name: Package into zip
         run: |
           cd .\dist\
-          7z a "${{ github.event.repository.name }}.${{ matrix.build-name }}.zip" ./${{ github.event.repository.name }} -mx9
+          7z a "${{ github.event.repository.name }}.windows-${{ matrix.architecture }}.zip" ./${{ github.event.repository.name }} -mx9
+
+      - name: Bundle 7zip into the executable folder
+        run: |
+          New-Item -ItemType Directory -Force dist\${{ github.event.repository.name }}\bin\7zip | Out-Null
+          Copy-Item dist\bin\7zip\* dist\${{ github.event.repository.name }}\bin\7zip\
+          curl -sL -o dist\${{ github.event.repository.name }}\bin\7zip\License.txt https://www.7-zip.org/license.txt
 
       - name: Package bundle zip
         run: |
           cd .\dist\
-          7z a "${{ github.event.repository.name }}.${{ matrix.build-name }}-bundle.zip" .\${{ github.event.repository.name }}\bin\7zip\7za.exe
-          7z a "${{ github.event.repository.name }}.${{ matrix.build-name }}-bundle.zip" .\${{ github.event.repository.name }} -mx9
+          7z a "${{ github.event.repository.name }}.windows-${{ matrix.architecture }}-bundle.zip" .\${{ github.event.repository.name }} -mx9
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ github.event.repository.name }}.${{ matrix.architecture }}
+          name: ${{ github.event.repository.name }}.windows-${{ matrix.architecture }}
           path: |
-            dist/${{ github.event.repository.name }}.${{ matrix.build-name }}.zip
-            dist/${{ github.event.repository.name }}.${{ matrix.build-name }}-bundle.zip
+            dist/${{ github.event.repository.name }}.windows-${{ matrix.architecture }}.zip
+            dist/${{ github.event.repository.name }}.windows-${{ matrix.architecture }}-bundle.zip
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
 
   create-release:
-    needs: [build]
+    needs: [build, docker]
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8
         with:
           path: dist/
           merge-multiple: true
 
+      - name: Determine if this is a pre-release
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *alpha* || "$GITHUB_REF_NAME" == *beta* ]]; then
+            echo "PRERELEASE=--prerelease" >> "$GITHUB_ENV"
+          fi
+
       - name: Create GitHub release
-        uses: ncipollo/release-action@v1.21.0
-        with:
-          artifacts: dist/*
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag
+          --generate-notes --title "$GITHUB_REF_NAME" $PRERELEASE

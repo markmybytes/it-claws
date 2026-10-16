@@ -144,11 +144,14 @@ def resolve_asus_static(
         website: Regional website code (default "global").
     """
     api_url = "https://rog.asus.com/support/webapi/product/GetPDDrivers"
-    response = client.get(api_url, params={
-        "website": website,
-        "model": model,
-        "osid": osid,
-    })
+    response = client.get(
+        api_url,
+        params={
+            "website": website,
+            "model": model,
+            "osid": osid,
+        },
+    )
     response.raise_for_status()
     data = response.json()
 
