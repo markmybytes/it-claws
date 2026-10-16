@@ -7,11 +7,11 @@ on:
       - main
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  static-check:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
