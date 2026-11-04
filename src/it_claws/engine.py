@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import queue
@@ -23,6 +24,47 @@ from .scrapers import (
     extract_archive,
     resolve_cookies,
 )
+
+
+def _sha1_file(path: Path) -> str:
+    """SHA1 (lowercase hex) of a file's bytes."""
+    digest = hashlib.sha1(usedforsecurity=False)
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _frame(arcname: str, digest: str) -> str:
+    """One data-fold frame: byte-length of arcname, then its SHA1."""
+    return f"{len(arcname.encode('utf-8'))}:{arcname}:{digest}\n"
+
+
+def _compute_hashes(entries: list[tuple[Path, str]]) -> dict[str, str]:
+    """Compute the manifest ``hashes`` field from the final ZIP entry list.
+
+    ``settings`` is the SHA1 of ``conf/setting.json`` (omitted when absent).
+    ``data`` folds ``conf/data.db`` + everything under ``drivers/``: dedupe by
+    arcname keeping the LAST occurrence, frame each file, sort the frame
+    strings, then SHA1 the concatenation (omitted when no data entry exists).
+    """
+    settings: str | None = None
+    data: dict[str, str] = {}
+    for filepath, arcname in entries:
+        if arcname == "conf/setting.json":
+            settings = _sha1_file(filepath)
+        elif arcname == "conf/data.db" or arcname.startswith("drivers/"):
+            data[arcname] = _sha1_file(filepath)
+
+    hashes: dict[str, str] = {}
+    if settings is not None:
+        hashes["settings"] = settings
+    if data:
+        frames = sorted(_frame(arcname, digest) for arcname, digest in data.items())
+        hashes["data"] = hashlib.sha1(
+            "".join(frames).encode("utf-8"), usedforsecurity=False
+        ).hexdigest()
+    return hashes
 
 
 def _normalise_source_path(source: str) -> str:
@@ -175,16 +217,6 @@ class ConcurrentPipeline:
         cleanup_empty_directories(output_root)
 
         if zip_path and all(s for _, s, _ in self._results):
-            manifest_path = output_root / "manifest.json"
-            if manifest:
-                manifest_path.write_text(
-                    json.dumps(
-                        {"format_version": 1, "exported_at": datetime.now(UTC).isoformat()},
-                        indent=2,
-                    )
-                    + "\n"
-                )
-
             entries: list[tuple[Path, str]] = []
 
             entries.extend(archive.walk(output_root, output_root, zip_prefix))
@@ -214,6 +246,20 @@ class ConcurrentPipeline:
                             if zip_prefix:
                                 arcname = f"{zip_prefix}/{arcname}"
                         entries.append((resolved, arcname))
+
+            manifest_path = output_root / "manifest.json"
+            if manifest:
+                manifest_path.write_text(
+                    json.dumps(
+                        {
+                            "format_version": 1,
+                            "exported_at": datetime.now(UTC).isoformat(),
+                            "hashes": _compute_hashes(entries),
+                        },
+                        indent=2,
+                    )
+                    + "\n"
+                )
 
             if manifest and manifest_path.exists():
                 entries = [(fp, an) for fp, an in entries if an != "manifest.json"]

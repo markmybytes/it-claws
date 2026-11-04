@@ -157,6 +157,34 @@ it-claws -o ./downloads -z ./driver-pack.zip \
 
 When the same directory is included via both `-o` and `--zip-include`, or when two `--zip-include` paths overlap, the entries are merged without duplication.
 
+### Manifest hashes
+
+With `--manifest`, the generated `manifest.json` keeps `format_version` and `exported_at` and gains a `hashes` object:
+
+```json
+"hashes": { "settings": "<sha1 hex>", "data": "<sha1 hex>" }
+```
+
+- **`settings`** — SHA1 (lowercase hex) of the bytes of the entry named `conf/setting.json`. Omitted when that entry is not in the archive.
+- **`data`** — a fold over `conf/data.db` and every file under `drivers/`:
+  1. dedupe by arcname, keeping the **last** occurrence in archive order;
+  2. frame each file as `len(arcname_bytes) + ":" + arcname + ":" + sha1_hex + "\n"`, where `len` is the **byte** length of the UTF-8 arcname (not the codepoint length);
+  3. sort the frame **strings** (byte-wise), not the arcnames;
+  4. SHA1 of the concatenation of the sorted frames. Omitted when there are no data entries (never the SHA1 of an empty string).
+
+`manifest.json` is written **last** in the ZIP. Verify an existing archive from a terminal without it-claws:
+
+```sh
+python - <<'EOF'
+import hashlib, zipfile
+z=zipfile.ZipFile("driver-pack.zip"); names=z.namelist(); H=lambda b:hashlib.sha1(b).hexdigest()
+print("settings:", H(z.read("conf/setting.json")) if "conf/setting.json" in names else None)
+d={n:H(z.read(n)) for n in names if n=="conf/data.db" or n.startswith("drivers/")}
+f=sorted(f"{len(n.encode())}:{n}:{h}\n" for n,h in d.items())
+print("data:", H("".join(f).encode()) if d else None)
+EOF
+```
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- DEPLOYMENT -->
