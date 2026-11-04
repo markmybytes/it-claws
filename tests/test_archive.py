@@ -51,7 +51,7 @@ class TestZip:
     """Tests for zip()."""
 
     def test_creates_zipfile_with_correct_args(self):
-        """Verify ZipFile is opened with the expected target, mode, compression, and default level."""
+        """Verify ZipFile is opened with the expected target, mode, compression, and level."""
         with patch("it_claws.archive.zipfile.ZipFile") as mock_zf_cls:
             mock_instance = MagicMock()
             mock_zf_cls.return_value.__enter__.return_value = mock_instance
