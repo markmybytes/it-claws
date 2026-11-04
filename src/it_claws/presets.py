@@ -79,7 +79,11 @@ TARGETS: list[ScrapeTarget | TargetGroup] = [
         resolver=resolve_static_download,
         resolver_kwargs={
             "url": "https://www.amd.com/en/support/downloads/drivers.html/chipsets/am5/x870e.html",
-            "selector": 'a[href*="hipset_Software"][href$=".exe"]',
+            "selector": (
+                "//a[contains(translate(@href,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')"
+                ",'chipset_software')][substring(@href,string-length(@href)-3)='.exe']"
+            ),
+            "selector_type": "xpath",
         },
         file_type="exe",
         rename_as="AMD_Chipset_Software",
